@@ -1,0 +1,153 @@
+pragma solidity ^0.5.0;
+
+import '../contracts/Registration.sol';
+import '../contracts/Access.sol';
+import '../contracts/DiamondsToken.sol';
+
+contract diamondOperations is diamondsToken,df_Access{
+    df_Registration internal registration;
+    df_Access internal access;
+    diamondsToken internal token;
+
+constructor()
+ public {
+  CEO = msg.sender;
+  }
+
+
+
+struct Diamond {
+    string gemName;
+    string gemCountry;
+    bytes32 gemcolor;
+    bytes32 gemclarity;
+    bytes32 gemcut;
+    uint256 gemcarat;
+    address owner;
+    string status;
+    uint256 ethPriceM;
+    uint256 ethPriceR;
+  }
+  using SafeMath for uint256;
+
+  Diamond[] public diamonds;
+  string constant private STATUS_PENDING = "Pending";
+  string constant private STATUS_VERIFIED = "Verified";
+  uint256 internal _Price;
+
+///Events.
+ event eventcreateDiamond(address _address, uint256 _diamondID);
+  event TransactionHistory(
+      uint256 _diamondID,
+      address _seller,
+      address _buyer,
+      uint256 _Price,
+      uint256 timestamp
+    );
+
+ mapping(uint256 => bool) internal diamondExists;  //Check if Diamond Exists
+ mapping(address => uint256) internal balances;      //Check this address has how many Diamonds
+ mapping(uint256 => address) internal diamondIdToOwner; //Map Diamond ID to owner.
+ mapping(uint256 => Diamond) internal diamondMetadata; //can we use mappig iterator?
+
+function createDiamond(
+    string memory _gemName,
+    string memory _gemCountry,
+    bytes32 _gemcolor,
+    bytes32 _gemclarity,
+    bytes32 _gemcut,
+    uint256 _gemcarat)
+    public
+    whenNotPaused{
+    require(registration._onlyManufacturer(), "Only Manufacture Can Create Diamond");
+    Diamond memory _diamond = Diamond(_gemName,_gemCountry,_gemcolor,_gemclarity,_gemcut,_gemcarat,msg.sender,STATUS_PENDING,0,0);
+    uint _diamondID = diamonds.push(_diamond);
+    token.diamondToken(msg.sender, _diamondID);
+    diamondExists[_diamondID] = true;
+    diamondMetadata[_diamondID] = _diamond;
+    emit eventcreateDiamond(msg.sender, _diamondID);
+  }
+
+function getPriceM(uint256 _gemcarat) internal view returns(uint256 convertedrate){
+      return conversionrateManufacture*_gemcarat;
+}
+
+function getPriceR(uint256 _gemcarat) internal view returns(uint256 convertedrate){
+      return conversionrateRetail*_gemcarat;
+}
+
+function VerifyDiamond(uint256 _diamondID)
+    public view
+    onlyAdminOrCEO
+    whenNotPaused{
+      require(diamondExists[_diamondID],"Diamond Not Created");
+      Diamond memory diamond = diamondMetadata[_diamondID];
+      diamond.status = STATUS_VERIFIED;
+      diamond.ethPriceM = getPriceM(diamond.gemcarat);
+      diamond.ethPriceR = getPriceR(diamond.gemcarat);
+    }
+
+function _isDiamondVerified(uint256 _diamondID) public view returns (bool) {
+      require(diamondExists[_diamondID],"Diamond not created");
+      return(keccak256(abi.encodePacked(diamondMetadata[_diamondID].status)) == keccak256(abi.encodePacked(STATUS_VERIFIED)));
+    }
+
+function _isManufacturer(address _address) public view returns (bool) {
+    require(registration._isRegistered(_address),"User Not registered");
+    return(keccak256(abi.encodePacked(registration._isUserType)) == keccak256(abi.encodePacked("Manufacturer")));
+    }
+
+function _isRetailer(address _address) internal view returns (bool) {
+      require(registration._isRegistered(_address),"User Not registered");
+      return(keccak256(abi.encodePacked(registration._isUserType)) == keccak256(abi.encodePacked("Retailer")));
+    }
+
+function _BuyfromManufacturer(
+      uint256 _diamondID,
+      address payable _seller
+      )
+      public payable
+      whenNotPaused{
+      require(_isDiamondVerified(_diamondID),"Diamond is not verified");
+      require(_isManufacturer(_seller),"Seller is not manufacturer");
+      Diamond storage diamond = diamondMetadata[_diamondID];
+      diamond.owner = msg.sender;
+      _Price = diamond.ethPriceM;
+      token.transferC(_seller,_Price);
+       _transferFrom(_seller, msg.sender, _diamondID);
+      emit TransactionHistory(_diamondID,_seller,msg.sender,_Price,now);
+  }
+
+function _BuyfromRetailer(
+      uint256 _diamondID,
+      address payable _seller
+      )
+      public payable
+      whenNotPaused{
+      require(_isDiamondVerified(_diamondID),"Diamond is not verified");
+      require(_isRetailer(_seller),"Seller is not Retailer");
+      Diamond storage diamond = diamondMetadata[_diamondID];
+      diamond.owner = msg.sender;
+      _Price = diamond.ethPriceM;
+      token.transferC(_seller,_Price);
+       _transferFrom(_seller, msg.sender, _diamondID);
+      emit TransactionHistory(_diamondID,_seller,msg.sender,_Price,now);
+  }
+
+function getDiamond(uint256 _diamondID)public view returns(
+  string memory,
+  string memory,
+  bytes32,
+  bytes32,
+  uint256,
+  address){
+  Diamond storage diamond = diamondMetadata[_diamondID];
+  return(diamond.gemName,diamond.gemCountry,diamond.gemclarity,diamond.gemcut,diamond.gemcarat,diamond.owner);
+  }
+
+  function ownerofToken(uint256 _diamondID) public view returns (address) {
+      require(diamondExists[_diamondID],"Diamond is not created");
+      return(ownerOf(_diamondID));
+  }
+}
+
